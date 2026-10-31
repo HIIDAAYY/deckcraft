@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DeckCraft for Android. build-apk.sh fills in the package and version. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="deckcraft.android">
+
+    <!-- wgpu draws with Vulkan where the device has it, OpenGL ES 3 otherwise. -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- Links in cells open in the browser or mail app (Android 11+ package visibility). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mailto" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="DeckCraft"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="true"
+        android:allowBackup="true"
+        android:resizeableActivity="true"
+        android:extractNativeLibs="true"
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+
+        <!-- One window: a workbook opened from another app arrives in the running app.
+             Rotating, resizing or a keyboard coming and going never restarts it. -->
+        <activity
+            android:name="deckcraft.android.DeckCraftActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|locale|layoutDirection|fontScale">
+            <meta-data android:name="android.app.lib_name" android:value="deckcraft_android" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Open with DeckCraft: PowerPoint presentations, shows and templates. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.slideshow" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.template" />
+            </intent-filter>
+
+            <!-- Share a presentation to DeckCraft. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.slideshow" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

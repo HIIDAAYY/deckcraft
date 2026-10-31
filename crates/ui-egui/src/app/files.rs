@@ -263,8 +263,18 @@ impl SlideApp {
         let Some((title, doc)) = self.session.active().map(|d| (d.title(), d.doc.clone())) else { return false };
         let mut params = if params.is_object() { params } else { json!({}) };
         if self.services.pick_save.is_none() {
-            // Web: the browser hands the PDF to the user.
             let bytes = deckcraft_engine::cmd::file::pdf_bytes(&doc, &params);
+            // Android: the system's print dialog. Web: the browser hands the PDF to the user.
+            if let Some(print) = self.services.print.as_mut() {
+                let printed = bytes.map_err(|e| e.to_string()).and_then(|b| print(&b));
+                return match printed {
+                    Ok(()) => true,
+                    Err(e) => {
+                        self.set_status(format!("Couldn't print: {e}"));
+                        false
+                    }
+                };
+            }
             return self.download(&format!("{title}.pdf"), bytes);
         }
         let preview_path = match self.print_previews.create(&title) {

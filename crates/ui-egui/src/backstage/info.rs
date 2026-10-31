@@ -166,7 +166,8 @@ pub(super) fn save_as(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: 
             })
             .response
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, "Save as type"));
-        let web = app.services.pick_save.is_none();
+        // Android hands the file to its own save picker through `download`, which asks where.
+        let web = app.services.pick_save.is_none() && !cfg!(target_os = "android");
         let label = if web { "Download" } else { "Save" };
         let save = ui.add(egui::Button::new(RichText::new(label).color(t.accent_text)).fill(t.accent).min_size(vec2(84.0, 26.0)));
         if save.on_hover_text(if web { "Download the file" } else { "Choose where to save" }).clicked() {

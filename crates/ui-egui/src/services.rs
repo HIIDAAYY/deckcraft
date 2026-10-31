@@ -54,6 +54,9 @@ pub struct Services {
     pub clipboard_html: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Put HTML and its plain-text alternative on the system clipboard. `true` when it landed.
     pub clipboard_set_html: Option<Box<dyn FnMut(&str, &str) -> bool>>,
+    /// Print a PDF with the system's print dialog (Android). Without one, File › Print opens the
+    /// PDF in the system viewer (desktop) or downloads it (web).
+    pub print: Option<Box<dyn FnMut(&[u8]) -> Result<(), String>>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
 }
