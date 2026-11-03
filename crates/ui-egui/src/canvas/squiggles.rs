@@ -239,9 +239,61 @@ pub const LANGS: &[(&str, &str)] = &[
     ("עברית", "he-IL"),
 ];
 
-/// The display name of a language tag (the tag itself when it isn't in [`LANGS`]).
+/// The display name of a language tag: from [`LANGS`], else the language and region named as
+/// PowerPoint names them ("en-ID" → "English (Indonesia)", "id-ID" → "Indonesian"), else the tag.
 pub fn lang_name(tag: &str) -> String {
-    LANGS.iter().find(|(_, t)| t.eq_ignore_ascii_case(tag)).map_or_else(|| tag.to_string(), |(n, _)| n.to_string())
+    if let Some((n, _)) = LANGS.iter().find(|(_, t)| t.eq_ignore_ascii_case(tag)) {
+        return n.to_string();
+    }
+    let mut parts = tag.trim().split(['-', '_']);
+    let lang = parts.next().unwrap_or("").to_ascii_lowercase();
+    let region = parts.find(|p| p.len() == 2).map(str::to_ascii_uppercase);
+    const LANGUAGES: &[(&str, &str)] = &[
+        ("en", "English"),
+        ("id", "Indonesian"),
+        ("in", "Indonesian"),
+        ("ms", "Malay"),
+        ("jv", "Javanese"),
+        ("su", "Sundanese"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("nl", "Dutch"),
+        ("pt", "Portuguese"),
+        ("it", "Italian"),
+        ("ar", "Arabic"),
+        ("zh", "Chinese"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("th", "Thai"),
+        ("vi", "Vietnamese"),
+        ("tl", "Filipino"),
+        ("fil", "Filipino"),
+        ("hi", "Hindi"),
+    ];
+    const REGIONS: &[(&str, &str)] = &[
+        ("ID", "Indonesia"),
+        ("MY", "Malaysia"),
+        ("SG", "Singapore"),
+        ("PH", "Philippines"),
+        ("IN", "India"),
+        ("US", "United States"),
+        ("GB", "United Kingdom"),
+        ("AU", "Australia"),
+        ("NZ", "New Zealand"),
+        ("CA", "Canada"),
+        ("IE", "Ireland"),
+        ("ZA", "South Africa"),
+        ("BN", "Brunei"),
+    ];
+    let Some(name) = LANGUAGES.iter().find(|(c, _)| *c == lang).map(|(_, n)| *n) else { return tag.to_string() };
+    // A language spoken mainly in one country needs no region (PowerPoint: "Indonesian").
+    let own =
+        matches!((lang.as_str(), region.as_deref()), ("id" | "in", Some("ID")) | ("jv" | "su", Some("ID")) | ("th", Some("TH")) | ("vi", Some("VN")));
+    match region.and_then(|r| REGIONS.iter().find(|(c, _)| *c == r).map(|(_, n)| *n)) {
+        Some(region) if !own => format!("{name} ({region})"),
+        _ => name.to_string(),
+    }
 }
 
 /// A language name the current interface fonts can actually draw: the native name when every
@@ -504,4 +556,18 @@ pub fn paint(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2, scale: f32) 
         t += step;
     }
     painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0, egui::Color32::from_rgb(0xE0, 0x20, 0x20))));
+}
+
+#[cfg(test)]
+mod lang_name_tests {
+    #[test]
+    fn languages_outside_the_list_are_named_with_their_region() {
+        use super::lang_name;
+        assert_eq!(lang_name("en-US"), "English (United States)");
+        assert_eq!(lang_name("en-ID"), "English (Indonesia)");
+        assert_eq!(lang_name("id-ID"), "Indonesian");
+        assert_eq!(lang_name("ms_MY"), "Malay (Malaysia)");
+        assert_eq!(lang_name("xx-YY"), "xx-YY");
+        assert_eq!(lang_name(""), "");
+    }
 }

@@ -135,6 +135,12 @@ struct Shell {
     open_copies: Vec<String>,
     /// Whether egui-winit's own clipboard holds [`PASTE_SEED`] yet.
     seeded: bool,
+    /// The free part of the window while the keyboard is down: the app keeps this layout when
+    /// the keyboard comes up, moved up by `pan` so the text being typed stays in sight.
+    rest: Option<egui::Rect>,
+    pan: f32,
+    /// Where the typed text was last frame (screen points).
+    typing_at: Option<egui::Rect>,
 }
 
 impl Shell {
@@ -153,6 +159,9 @@ impl Shell {
         if let Some(prefs) = prefs {
             app.session.prefs = prefs;
         }
+        // One screen: Presenter View would put its own window over the show instead of the slide
+        // filling the screen (PowerPoint shows it only with a second display).
+        app.ui.presenter_view = false;
         // Android may end the app whenever it is in the background: unsaved presentations come
         // back from the recovery folder on the next start.
         app.session.recovery_dir = deckcraft_engine::recovery::default_dir();
@@ -191,6 +200,9 @@ impl Shell {
             saves,
             open_copies: kept.into_iter().map(|(p, _)| p).collect(),
             seeded: false,
+            rest: None,
+            pan: 0.0,
+            typing_at: None,
         }
     }
 
@@ -358,6 +370,33 @@ impl Shell {
         }
     }
 
+    /// Where the app is laid out: the free part of the window, or, while the keyboard is up, the
+    /// layout it had without the keyboard moved up just enough to keep the text being typed above
+    /// the keyboard. Shrinking the layout instead would fit the slide into the few lines left
+    /// (8% zoom, unreadable).
+    fn keyboard_layout(&mut self, free: egui::Rect) -> egui::Rect {
+        let keyboard_up = !self.immersive && self.keyboard && self.insets.is_some_and(|i| i.bottom > 200.0);
+        if !keyboard_up {
+            self.rest = Some(free);
+            self.pan = 0.0;
+            return free;
+        }
+        let rest = match self.rest {
+            Some(r) if (r.width() - free.width()).abs() < 1.0 && r.height() > free.height() => r,
+            _ => return free,
+        };
+        if let Some(t) = self.typing_at {
+            let margin = 16.0;
+            if t.bottom() + margin > free.bottom() {
+                self.pan += t.bottom() + margin - free.bottom();
+            } else if t.top() - margin < free.top() {
+                self.pan -= free.top() - (t.top() - margin);
+            }
+        }
+        self.pan = self.pan.clamp(0.0, (rest.height() - free.height()).max(0.0));
+        rest.translate(egui::vec2(0.0, -self.pan))
+    }
+
     /// Show the on-screen keyboard when a text field takes typing right after a tap; put it away
     /// when nothing takes typing.
     fn keyboard_follows(&mut self, ctx: &egui::Context, typing_area: Option<egui::Rect>, released: bool, now: f64) {
@@ -377,7 +416,16 @@ impl Shell {
                 }
             }
             Some(_) => {
-                let recent = self.tapped_at.is_some_and(|t| now - t < 0.8);
+                // A selected picture or shape takes typing too (typing starts its text), but a
+                // tap that selects or drags one isn't asking for the keyboard: only text being
+                // edited (a double tap into a text box, the notes, a dialog field) is.
+                let shape_only = self
+                    .app
+                    .session
+                    .active()
+                    .is_some_and(|d| d.selection.text.is_none() && d.selection.cells.is_none() && !d.selection.shapes.is_empty())
+                    && ctx.memory(|m| m.focused().is_none());
+                let recent = !shape_only && self.tapped_at.is_some_and(|t| now - t < 0.8);
                 if recent && (!self.keyboard || released) {
                     self.keyboard = true;
                     self.tapped_at = None;
@@ -430,6 +478,8 @@ impl eframe::App for Shell {
         }
         // Ctrl+V with nothing on the clipboard pastes nothing.
         raw.events.retain(|e| !matches!(e, egui::Event::Paste(text) if text.is_empty()));
+        // In a slide show a swipe turns one slide (not a scroll that coasts on).
+        self.touches.page_mode = self.app.show.is_some();
         if self.touches.process(raw) {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -447,8 +497,12 @@ impl eframe::App for Shell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let (pressed_at, released, now) =
-            ui.ctx().input(|i| (i.pointer.any_pressed().then(|| i.pointer.press_origin()).flatten(), i.pointer.any_released(), i.time));
+        // Only a finger's tap (the primary button): a two-finger tap is a right-click, which opens
+        // a menu, not the keyboard.
+        let (pressed_at, released, now) = ui.ctx().input(|i| {
+            let primary = i.pointer.button_pressed(egui::PointerButton::Primary);
+            (primary.then(|| i.pointer.press_origin()).flatten(), i.pointer.button_released(egui::PointerButton::Primary), i.time)
+        });
         if let Some(pos) = pressed_at {
             self.press = Some((pos, self.app.backstage.is_some()));
         }
@@ -466,7 +520,8 @@ impl eframe::App for Shell {
                 log::warn!("system bars: {e}");
             }
         }
-        ui.scope_builder(egui::UiBuilder::new().max_rect(free), |ui| {
+        let layout = self.keyboard_layout(free);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(layout), |ui| {
             ui.set_clip_rect(free);
             self.app.ui(ui);
         });
@@ -489,6 +544,7 @@ impl eframe::App for Shell {
             self.seeded = true;
             ui.ctx().copy_text(PASTE_SEED.to_string());
         }
+        self.typing_at = typing_area;
         self.keyboard_follows(&ui.ctx().clone(), typing_area, released, now);
         self.after_app();
     }

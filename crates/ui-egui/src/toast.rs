@@ -25,7 +25,8 @@ pub fn missing_fonts_message(fonts: &[String]) -> Option<String> {
         [a, b, c, rest @ ..] => format!("{a}, {b}, {c} and {} more", rest.len()),
     };
     let (it, them) = if fonts.len() == 1 { ("isn't", "it") } else { ("aren't", "them") };
-    Some(format!("{names} {it} installed on this computer. Text that uses {them} is shown in a similar font."))
+    let here = if cfg!(target_os = "android") { "this device" } else { "this computer" };
+    Some(format!("{names} {it} installed on {here}. Text that uses {them} is shown in a similar font."))
 }
 
 /// Toast the active presentation's missing fonts, once per opened document.

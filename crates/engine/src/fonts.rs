@@ -29,12 +29,29 @@ pub fn missing_fonts(p: &Presentation) -> Vec<String> {
     let db = FontDb::global();
     let mut out: Vec<String> = Vec::new();
     for family in used_fonts(p) {
-        if !family.starts_with('.') && !db.has_family(&family) && !out.iter().any(|f| f.eq_ignore_ascii_case(&family)) {
+        if !family.starts_with('.')
+            && !db.has_family(&family)
+            && !metric_clone(&family).is_some_and(|c| db.has_family(c))
+            && !out.iter().any(|f| f.eq_ignore_ascii_case(&family))
+        {
             out.push(family);
         }
     }
     out.sort_by_key(|f| f.to_lowercase());
     out
+}
+
+/// The open font made to the same widths as an Office font, if any: text in it lines up as in
+/// PowerPoint, so its absence is nothing to warn about (Calibri → Carlito, Arial → Liberation Sans).
+pub fn metric_clone(family: &str) -> Option<&'static str> {
+    Some(match family.trim().to_ascii_lowercase().as_str() {
+        "calibri" => "Carlito",
+        "cambria" => "Caladea",
+        "arial" => "Liberation Sans",
+        "times new roman" => "Liberation Serif",
+        "courier new" => "Liberation Mono",
+        _ => return None,
+    })
 }
 
 /// The families the slides' text runs and bullets are drawn in.
@@ -166,5 +183,17 @@ fn replace_list(l: &mut deckcraft_model::text::ListStyle, fix: &mut dyn FnMut(&m
 fn replace_run(r: &mut deckcraft_model::text::RunProps, fix: &mut dyn FnMut(&mut Option<String>)) {
     for f in [&mut r.font, &mut r.font_ea, &mut r.font_cs, &mut r.font_sym] {
         fix(f);
+    }
+}
+
+#[cfg(test)]
+mod clone_tests {
+    #[test]
+    fn office_fonts_have_their_metric_clones() {
+        use super::metric_clone;
+        assert_eq!(metric_clone("Calibri"), Some("Carlito"));
+        assert_eq!(metric_clone(" times new roman "), Some("Liberation Serif"));
+        assert_eq!(metric_clone("Calibri Light"), None, "no light Carlito: still reported");
+        assert_eq!(metric_clone("Aptos"), None);
     }
 }

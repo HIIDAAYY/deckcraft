@@ -38,7 +38,7 @@ enum State {
     /// One finger down, not yet a swipe or a long press.
     Pending { id: TouchId, start: Pos2, since: f64, last: Pos2 },
     /// One finger swiping: scrolling.
-    Scrolling { id: TouchId, last: Pos2, last_time: f64, velocity: Vec2 },
+    Scrolling { id: TouchId, start: Pos2, last: Pos2, last_time: f64, velocity: Vec2 },
     /// One finger held: the primary button is down and moves drag (select).
     Pressing { id: TouchId },
     /// Two or more fingers: pinch zoom, or a right-click when they lift without moving.
@@ -62,6 +62,9 @@ pub struct Touches {
     modifiers: Modifiers,
     /// The touch device the fingers are on (for the cancel that ends a held finger's touch).
     device: egui::TouchDeviceId,
+    /// Pages instead of scrolling (a slide show): a swipe turns one page, as an arrow key when
+    /// the finger lifts, and never scrolls or coasts.
+    pub page_mode: bool,
 }
 
 impl Default for Touches {
@@ -74,6 +77,7 @@ impl Default for Touches {
             last_time: 0.0,
             modifiers: Modifiers::NONE,
             device: egui::TouchDeviceId(0),
+            page_mode: false,
         }
     }
 }
@@ -185,20 +189,24 @@ impl Touches {
                     State::Pending { id: p, start, since, .. } if p == id => {
                         if (pos - start).length() > SLOP {
                             let delta = pos - start;
-                            out.push(wheel(delta, TouchPhase::Start, modifiers));
+                            if !self.page_mode {
+                                out.push(wheel(delta, TouchPhase::Start, modifiers));
+                            }
                             let elapsed = ((now - since) as f32).max(1.0 / 120.0);
-                            self.state = State::Scrolling { id, last: pos, last_time: now, velocity: delta / elapsed };
+                            self.state = State::Scrolling { id, start, last: pos, last_time: now, velocity: delta / elapsed };
                         } else {
                             self.state = State::Pending { id, start, since, last: pos };
                         }
                     }
-                    State::Scrolling { id: s, last, last_time, velocity } if s == id => {
+                    State::Scrolling { id: s, start, last, last_time, velocity } if s == id => {
                         let delta = pos - last;
-                        out.push(wheel(delta, TouchPhase::Move, modifiers));
+                        if !self.page_mode {
+                            out.push(wheel(delta, TouchPhase::Move, modifiers));
+                        }
                         let dt = ((now - last_time) as f32).max(1.0 / 240.0);
                         // A smoothed velocity: the last few moves count most.
                         let velocity = if now > last_time { velocity * 0.3 + (delta / dt) * 0.7 } else { velocity };
-                        self.state = State::Scrolling { id, last: pos, last_time: now, velocity };
+                        self.state = State::Scrolling { id, start, last: pos, last_time: now, velocity };
                     }
                     State::Pressing { id: p } if p == id => out.push(Event::PointerMoved(pos)),
                     State::Multi { since, first, moved } => {
@@ -222,6 +230,19 @@ impl Touches {
                         } else {
                             out.push(Event::PointerGone);
                         }
+                        self.state = State::Idle;
+                    }
+                    State::Scrolling { id: s, start, .. } if s == id && self.page_mode => {
+                        // A swipe to the left (or up) is the next page, to the right (or down)
+                        // the previous one: one page per swipe.
+                        if !cancelled {
+                            let d = pos - start;
+                            let next = if d.x.abs() >= d.y.abs() { d.x < 0.0 } else { d.y < 0.0 };
+                            let key = if next { egui::Key::ArrowRight } else { egui::Key::ArrowLeft };
+                            out.push(Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+                            self.next.push(Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers });
+                        }
+                        self.next.push(Event::PointerGone);
                         self.state = State::Idle;
                     }
                     State::Scrolling { id: s, last_time, velocity, .. } if s == id => {
@@ -350,6 +371,27 @@ mod tests {
         all.extend(frame(&mut t, 0.50, finger(0, TouchPhase::End, 100.0, 200.0)));
         assert!(presses(&all).is_empty());
         assert_eq!(scrolled(&all), egui::vec2(0.0, -100.0), "content follows the finger up");
+    }
+
+    #[test]
+    fn in_page_mode_a_swipe_turns_one_page_and_never_scrolls() {
+        let mut t = Touches { page_mode: true, ..Touches::default() };
+        let mut events = frame(&mut t, 0.0, finger(0, TouchPhase::Start, 600.0, 300.0));
+        events.extend(frame(&mut t, 0.05, finger(0, TouchPhase::Move, 400.0, 305.0)));
+        events.extend(frame(&mut t, 0.1, finger(0, TouchPhase::End, 200.0, 310.0)));
+        for i in 2..40 {
+            events.extend(frame(&mut t, 0.1 + f64::from(i) * 0.016, vec![]));
+        }
+        assert_eq!(scrolled(&events), Vec2::ZERO, "no scrolling");
+        let keys: Vec<(egui::Key, bool)> =
+            events.iter().filter_map(|e| if let Event::Key { key, pressed, .. } = e { Some((*key, *pressed)) } else { None }).collect();
+        assert_eq!(keys, [(egui::Key::ArrowRight, true), (egui::Key::ArrowRight, false)], "one page on");
+        assert!(presses(&events).is_empty(), "and no click");
+        let mut back = frame(&mut t, 2.0, finger(1, TouchPhase::Start, 200.0, 300.0));
+        back.extend(frame(&mut t, 2.05, finger(1, TouchPhase::Move, 500.0, 300.0)));
+        back.extend(frame(&mut t, 2.1, finger(1, TouchPhase::End, 700.0, 300.0)));
+        back.extend(frame(&mut t, 2.2, vec![]));
+        assert!(back.iter().any(|e| matches!(e, Event::Key { key: egui::Key::ArrowLeft, pressed: true, .. })), "a swipe right goes back");
     }
 
     #[test]

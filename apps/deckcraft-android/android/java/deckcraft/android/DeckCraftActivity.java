@@ -250,8 +250,33 @@ public class DeckCraftActivity extends NativeActivity {
                 toast("Printing is not available on this device.");
                 return;
             }
-            pm.print(name, new PdfAdapter(new File(path), name), new PrintAttributes.Builder().build());
+            // Slides print sideways on the paper the country uses (Letter in the US and Canada,
+            // A4 elsewhere), as PowerPoint prints full-page slides; a portrait PDF (notes pages,
+            // handouts) stays upright.
+            String country = Locale.getDefault().getCountry();
+            PrintAttributes.MediaSize paper = ("US".equals(country) || "CA".equals(country))
+                    ? PrintAttributes.MediaSize.NA_LETTER : PrintAttributes.MediaSize.ISO_A4;
+            File file = new File(path);
+            if (firstPageIsLandscape(file)) {
+                paper = paper.asLandscape();
+            }
+            pm.print(name, new PdfAdapter(file, name), new PrintAttributes.Builder().setMediaSize(paper).build());
         });
+    }
+
+    /** Whether the PDF's first page is wider than it is tall. */
+    private static boolean firstPageIsLandscape(File file) {
+        try (android.os.ParcelFileDescriptor fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+             android.graphics.pdf.PdfRenderer renderer = new android.graphics.pdf.PdfRenderer(fd)) {
+            if (renderer.getPageCount() == 0) {
+                return false;
+            }
+            try (android.graphics.pdf.PdfRenderer.Page page = renderer.openPage(0)) {
+                return page.getWidth() > page.getHeight();
+            }
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Put a copy on the system clipboard: as a table (html, when not empty) and as text. */
