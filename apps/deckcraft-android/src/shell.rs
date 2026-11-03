@@ -533,8 +533,25 @@ impl eframe::App for Shell {
             (o.ime.as_ref().map(|ime| ime.rect), copied)
         });
         // The shell decides when the keyboard shows, not egui-winit (which would show it whenever
-        // a field has focus, also when the app gave it focus without a tap).
-        ui.ctx().output_mut(|o| o.ime = None);
+        // a field has focus, also when the app gave it focus without a tap). Links open with the
+        // activity's own view intent (egui-winit has no browser to hand them to here).
+        let urls = ui.ctx().output_mut(|o| {
+            o.ime = None;
+            let mut urls = Vec::new();
+            o.commands.retain(|c| match c {
+                egui::OutputCommand::OpenUrl(u) => {
+                    urls.push(u.url.clone());
+                    false
+                }
+                _ => true,
+            });
+            urls
+        });
+        for url in urls {
+            if let Err(e) = bridge::open_url(&url) {
+                log::warn!("opening {url}: {e}");
+            }
+        }
         if let Some(text) = copied
             && let Err(e) = bridge::set_clipboard("", &text)
         {
