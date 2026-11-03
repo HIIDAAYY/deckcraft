@@ -269,9 +269,13 @@ impl Touches {
                             if !cancelled && !moved && now - since <= TWO_FINGER_TAP {
                                 out.push(Event::PointerMoved(first));
                                 out.push(button(first, PointerButton::Secondary, true, modifiers));
+                                // The pointer stays there after the release: a response's
+                                // `secondary_clicked` (egui's context menus) needs it still over
+                                // the widget in the frame the button comes up.
                                 self.next.push(button(first, PointerButton::Secondary, false, modifiers));
+                            } else {
+                                self.next.push(Event::PointerGone);
                             }
-                            self.next.push(Event::PointerGone);
                             self.state = State::Idle;
                         }
                     }
