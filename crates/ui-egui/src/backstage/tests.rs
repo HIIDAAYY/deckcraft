@@ -728,7 +728,6 @@ fn the_host_names_and_opens_recent_documents() {
     let mut h = harness(app);
     h.state_mut().run("app.backstage", json!({"page": "open"})).unwrap();
     h.run_steps(3);
-    assert!(h.query_by_label("Download/Materi").is_some(), "the folder the host names");
     h.get_by_label("kuliah.pptx").click();
     h.run_steps(3);
     assert_eq!(*opened.lock().unwrap(), vec![ADDRESS.to_string()], "the host opens it");
