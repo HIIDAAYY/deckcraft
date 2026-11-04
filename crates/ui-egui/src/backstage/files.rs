@@ -150,8 +150,7 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
             app.forget_recent(&path);
         }
         if resp.clicked() && app.services.open_recent.as_ref().is_some_and(|open| open(&path)) {
-            // The host reads it again; the presentation arrives on a later frame.
-            app.close_backstage();
+            // The host reads it again; File closes when the presentation arrives (a later frame).
         } else if resp.clicked() {
             app.open_path_in_background(&path);
         }

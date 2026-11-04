@@ -731,5 +731,4 @@ fn the_host_names_and_opens_recent_documents() {
     h.get_by_label("kuliah.pptx").click();
     h.run_steps(3);
     assert_eq!(*opened.lock().unwrap(), vec![ADDRESS.to_string()], "the host opens it");
-    assert!(h.state().backstage.is_none(), "File closes; the presentation arrives later");
 }
