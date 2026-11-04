@@ -101,8 +101,10 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         return;
     }
     let q = query.trim().to_lowercase();
+    // Android: entries the host knows (document addresses) carry the host's name and folder.
+    let place_of = |app: &SlideApp, p: &str| app.services.place.as_ref().and_then(|place| place(p)).unwrap_or_else(|| split_path(p));
     let list: Vec<String> =
-        app.ui.recent.iter().filter(|p| q.is_empty() || split_path(p).0.to_lowercase().contains(&q)).take(limit).cloned().collect();
+        app.ui.recent.iter().filter(|p| q.is_empty() || place_of(app, p).0.to_lowercase().contains(&q)).take(limit).cloned().collect();
     if list.is_empty() {
         dim(ui, &format!("No recent presentations match “{}”.", query.trim()));
         return;
@@ -110,7 +112,7 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
     let width = ui.available_width().min(CONTENT_W);
     for path in list {
         let missing = !app.recent_exists(&path);
-        let (name, folder) = split_path(&path);
+        let (name, folder) = place_of(app, &path);
         let (rect, resp) = ui.allocate_exact_size(vec2(width, 44.0), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         let p = ui.painter();
@@ -131,7 +133,8 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
                 p.text(pos2(visible_right - 82.0, rect.center().y), Align2::RIGHT_CENTER, "(missing)", theme::font(11.0), t.text_dim);
             }
         }
-        let resp = if missing { resp.on_hover_text(format!("{path} — this file can't be found")) } else { resp.on_hover_text(&path) };
+        let shown = if path.contains("://") { format!("{folder}/{name}") } else { path.clone() };
+        let resp = if missing { resp.on_hover_text(format!("{shown} — this file can't be found")) } else { resp.on_hover_text(shown) };
         // Remove from the list: a real labelled widget on top of the row, with a code-drawn icon
         // (a text glyph would need a font that has it).
         let x = ui.allocate_rect(
@@ -146,7 +149,10 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         if x.on_hover_text("Remove from Recent").clicked() {
             app.forget_recent(&path);
         }
-        if resp.clicked() {
+        if resp.clicked() && app.services.open_recent.as_ref().is_some_and(|open| open(&path)) {
+            // The host reads it again; the presentation arrives on a later frame.
+            app.close_backstage();
+        } else if resp.clicked() {
             app.open_path_in_background(&path);
         }
     }

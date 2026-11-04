@@ -32,15 +32,19 @@ pub(super) fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
         return;
     };
     // On Android a presentation opened from storage is edited as a private working copy: its
-    // path names the app's own folder, not where the file is, so it isn't shown.
-    let path = v.get("path").and_then(Value::as_str).map(str::to_string).filter(|_| !cfg!(target_os = "android"));
+    // path names the app's own folder, not where the file is, so the host's name for it is shown.
+    let raw_path = v.get("path").and_then(Value::as_str).map(str::to_string);
+    let place = raw_path.as_deref().and_then(|p| app.services.place.as_ref().and_then(|place| place(p)));
+    let location = place.as_ref().map(|(name, folder)| if folder.is_empty() { name.clone() } else { format!("{folder}/{name}") });
+    let path = raw_path.filter(|_| !cfg!(target_os = "android"));
     let title = v.get("title").and_then(Value::as_str).unwrap_or("").to_string();
     let dirty = v.get("dirty").and_then(Value::as_bool).unwrap_or(false);
     ui.label(RichText::new(&title).font(theme::font(24.0)).color(t.accent));
-    match &path {
-        Some(p) => dim(ui, p),
-        None if cfg!(target_os = "android") && v.get("path").is_some_and(|p| !p.is_null()) => {}
-        None => dim(ui, "Not saved yet"),
+    match (&path, &location) {
+        (_, Some(l)) => dim(ui, l),
+        (Some(p), None) => dim(ui, p),
+        (None, None) if cfg!(target_os = "android") && v.get("path").is_some_and(|p| !p.is_null()) => {}
+        (None, None) => dim(ui, "Not saved yet"),
     }
     if let Some(p) = &path {
         ui.add_space(8.0);
@@ -114,8 +118,10 @@ pub(super) fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                     }
                     ui.end_row();
                 }
-                if !cfg!(target_os = "android") {
-                    row(ui, "Location", path.clone().unwrap_or_else(|| "Not saved yet".into()));
+                match &location {
+                    Some(l) => row(ui, "Location", l.clone()),
+                    None if !cfg!(target_os = "android") => row(ui, "Location", path.clone().unwrap_or_else(|| "Not saved yet".into())),
+                    None => {}
                 }
             });
         });

@@ -59,4 +59,11 @@ pub struct Services {
     pub print: Option<Box<dyn FnMut(&[u8]) -> Result<(), String>>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
+    /// Android: where a presentation really is, for a path the user never sees (a private working
+    /// copy) or a Recent entry that is a document address: (name, folder) as the user knows
+    /// them. `None` from the host shows the path as it is.
+    pub place: Option<Box<dyn Fn(&str) -> Option<(String, String)>>>,
+    /// Android: open a Recent entry that is a document address (the host reads it and hands the
+    /// presentation over). `false`: not one of its own; it opens as a path.
+    pub open_recent: Option<Box<dyn Fn(&str) -> bool>>,
 }

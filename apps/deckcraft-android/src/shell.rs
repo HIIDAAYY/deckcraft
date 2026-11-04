@@ -13,6 +13,7 @@ use serde_json::json;
 use winit::platform::android::activity::AndroidApp;
 
 use crate::mailbox::{self, Message, Outcome};
+use crate::places::Places;
 use crate::workcopies::{Notice, State, WorkCopies};
 use crate::{bridge, keys, touch::Touches};
 
@@ -105,6 +106,8 @@ struct Saves {
 const PASTE_SEED: &str = "\u{2063}";
 
 struct Shell {
+    /// Where presentations are, in the user's words (File › Info, Recent).
+    places: Rc<RefCell<Places>>,
     app: SlideApp,
     dirs: Dirs,
     /// Files the app asked for (or that arrived from another app), delivered to it.
@@ -150,7 +153,8 @@ impl Shell {
         let waiting = Rc::new(Cell::new(0));
         let messages = Rc::new(RefCell::new(Vec::new()));
         let saves = Rc::new(RefCell::new(Saves::default()));
-        let services = services(&dirs, inbox.clone(), waiting.clone(), messages.clone(), saves.clone());
+        let places = Rc::new(RefCell::new(Places::load(dirs.profile.join("places.json"))));
+        let services = services(&dirs, inbox.clone(), waiting.clone(), messages.clone(), saves.clone(), places.clone());
         let mut app = SlideApp::new(Session::new(), services);
         let (ui, prefs) = deckcraft_ui_egui::settings::load(&dirs.profile);
         if let Some(ui) = ui {
@@ -203,6 +207,7 @@ impl Shell {
             rest: None,
             pan: 0.0,
             typing_at: None,
+            places,
         }
     }
 
@@ -271,6 +276,7 @@ impl Shell {
             return;
         };
         self.deliver(InboxEvent::Cancelled { id });
+        self.remember(&uri, &name);
         // Already open from the same file: show it rather than a second copy.
         if let Some(i) = self.app.session.documents().iter().position(|d| d.path.as_deref().is_some_and(|p| self.copies.uri(p) == Some(uri.as_str())))
         {
@@ -322,12 +328,24 @@ impl Shell {
                 } else {
                     self.copies.link_unsynced(&path, uri);
                 }
+                self.remember(uri, name);
                 if let Some(old) = old.filter(|p| self.copies.contains(p)) {
                     self.copies.forget(&old);
                 }
             }
             Err(e) => log::warn!("{name} saved, but the presentation keeps its old file: {e}"),
         }
+    }
+
+    /// A presentation was opened from, or saved to, `uri` as `name`: it heads the Recent list,
+    /// which opens it again from there (the app keeps its permission to).
+    fn remember(&mut self, uri: &str, name: &str) {
+        self.places.borrow_mut().note(uri, name);
+        let recent = &mut self.app.ui.recent;
+        recent.retain(|r| r != uri);
+        recent.insert(0, uri.to_string());
+        recent.truncate(20);
+        self.places.borrow_mut().keep_only(recent);
     }
 
     /// Hand saved working copies to the activity, which writes them over their originals; note
@@ -344,6 +362,12 @@ impl Shell {
             }
         }
         self.open_copies = open.iter().filter(|p| self.copies.contains(p)).cloned().collect();
+        // File › Info names the file a working copy stands for.
+        for path in &self.open_copies {
+            if let Some(uri) = self.copies.uri(path) {
+                self.places.borrow_mut().link(path, uri);
+            }
+        }
         for (path, uri) in self.copies.saved(&open) {
             if let Err(e) = bridge::write_back(&path, &uri) {
                 log::warn!("write back {path}: {e}");
@@ -356,7 +380,7 @@ impl Shell {
                 job.doc = active;
             }
         }
-        // Working copies come and go; Android's own picker (File › Open) lists recent files.
+        // Working copies come and go: Recent lists the files they stand for (`remember`).
         let docs = self.dirs.docs.to_string_lossy().into_owned();
         self.app.ui.recent.retain(|p| !p.starts_with(&docs));
     }
@@ -631,9 +655,16 @@ fn clear_dir(dir: &Path) {
     }
 }
 
-fn services(dirs: &Dirs, inbox: Inbox, waiting: Rc<Cell<u32>>, messages: Rc<RefCell<Vec<String>>>, saves: Rc<RefCell<Saves>>) -> Services {
-    let open_waiting = waiting.clone();
-    let (open_messages, save_messages) = (messages.clone(), messages);
+fn services(
+    dirs: &Dirs,
+    inbox: Inbox,
+    waiting: Rc<Cell<u32>>,
+    messages: Rc<RefCell<Vec<String>>>,
+    saves: Rc<RefCell<Saves>>,
+    places: Rc<RefCell<Places>>,
+) -> Services {
+    let (open_waiting, recent_waiting) = (waiting.clone(), waiting.clone());
+    let (open_messages, recent_messages, save_messages) = (messages.clone(), messages.clone(), messages);
     let open_inbox = inbox.clone();
     let outbox = dirs.outbox.clone();
     let print_outbox = dirs.outbox.clone();
@@ -661,6 +692,20 @@ fn services(dirs: &Dirs, inbox: Inbox, waiting: Rc<Cell<u32>>, messages: Rc<RefC
         clipboard_html: Some(Box::new(move || read_text(&clipboard_html))),
         clipboard_set_html: Some(Box::new(|html: &str, text: &str| bridge::set_clipboard(html, text).is_ok())),
         inbox: Some(inbox),
+        place: Some(Box::new(move |path: &str| places.borrow().get(path))),
+        open_recent: Some(Box::new(move |entry: &str| {
+            if !entry.starts_with("content://") {
+                return false;
+            }
+            match bridge::open_recent(entry) {
+                Ok(()) => recent_waiting.set(recent_waiting.get().saturating_add(1)),
+                Err(e) => {
+                    log::error!("cannot open {entry}: {e}");
+                    recent_messages.borrow_mut().push(format!("Couldn't open the presentation: {e}"));
+                }
+            }
+            true
+        })),
         ..Default::default()
     }
 }

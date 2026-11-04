@@ -704,3 +704,33 @@ fn options_in_backstage_opens_preferences_and_cancel_closes_it() {
     assert!(h.state().dialog.is_none(), "Cancel closes Preferences dialog");
     assert!(h.state().backstage_open(), "Backstage remains open");
 }
+
+/// Android: a Recent entry that is a document address shows the name and folder the host gives
+/// and opens through the host, which reads it again; Info names where the presentation is.
+#[test]
+fn the_host_names_and_opens_recent_documents() {
+    const ADDRESS: &str = "content://storage/document/primary%3ADownload%2Fkuliah.pptx";
+    let opened = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let capture = opened.clone();
+    let services = Services {
+        place: Some(Box::new(|key: &str| (key == ADDRESS).then(|| ("kuliah.pptx".to_string(), "Download/Materi".to_string())))),
+        open_recent: Some(Box::new(move |entry: &str| {
+            let ours = entry.starts_with("content://");
+            if ours {
+                capture.lock().unwrap().push(entry.to_string());
+            }
+            ours
+        })),
+        ..Default::default()
+    };
+    let mut app = SlideApp::new(Session::with_new(), services);
+    app.ui.recent = vec![ADDRESS.to_string()];
+    let mut h = harness(app);
+    h.state_mut().run("app.backstage", json!({"page": "open"})).unwrap();
+    h.run_steps(3);
+    assert!(h.query_by_label("Download/Materi").is_some(), "the folder the host names");
+    h.get_by_label("kuliah.pptx").click();
+    h.run_steps(3);
+    assert_eq!(*opened.lock().unwrap(), vec![ADDRESS.to_string()], "the host opens it");
+    assert!(h.state().backstage.is_none(), "File closes; the presentation arrives later");
+}

@@ -572,6 +572,18 @@ public class DeckCraftActivity extends NativeActivity {
         }
     }
 
+    /** Open a Recent presentation again from its address (the app kept its permission when it
+     *  was first opened or saved there). */
+    public void openRecent(final String uriText) {
+        io.execute(() -> {
+            Uri uri = Uri.parse(uriText);
+            boolean writable = checkCallingOrSelfUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            deliver(uri, "open", 0, writable);
+            postDone("open", 0);
+        });
+    }
+
     private void postDone(String purpose, long id) {
         post("done", (purpose + "\n" + id).getBytes(StandardCharsets.UTF_8));
     }
